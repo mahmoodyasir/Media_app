@@ -1,0 +1,5 @@
+-keep class com.google.crypto.tink.** { *; }
+-dontwarn com.google.errorprone.annotations.**
+-keep class androidx.media3.** { *; }
+-dontwarn androidx.media3.**
+-keep class com.mediaapp.editor.** { *; }
