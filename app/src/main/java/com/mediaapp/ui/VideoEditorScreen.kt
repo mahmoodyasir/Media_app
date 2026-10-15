@@ -21,10 +21,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Redo
@@ -67,6 +65,8 @@ import androidx.media3.ui.PlayerView
 import com.mediaapp.data.media.formatDuration
 import com.mediaapp.editor.FilterPreset
 import com.mediaapp.editor.image.ShapeKind
+import com.mediaapp.editor.timelineSliderRange
+import com.mediaapp.editor.timelineSliderValue
 import com.mediaapp.editor.video.FrameAspect
 import com.mediaapp.editor.video.OverlayKind
 import com.mediaapp.editor.video.previewLookEffects
@@ -181,10 +181,12 @@ fun VideoEditorRoute(snackbar: SnackbarHostState, onBack: () -> Unit) {
                 modifier = Modifier.padding(horizontal = 16.dp),
                 style = MaterialTheme.typography.labelLarge,
             )
+            val span = (clip.endMs - clip.startMs).coerceAtLeast(1L)
             Slider(
-                value = ui.playheadMs.toFloat().coerceIn(0f, (clip.endMs - clip.startMs).coerceAtLeast(1L).toFloat()),
-                onValueChange = { seekTo.value(it.toLong()) },
-                valueRange = 0f..(clip.endMs - clip.startMs).coerceAtLeast(1L).toFloat(),
+                value = timelineSliderValue(ui.playheadMs, span),
+                onValueChange = { seekTo.value(vm.scrub(it.toLong(), span)) },
+                onValueChangeFinished = vm::endScrub,
+                valueRange = timelineSliderRange(span),
             )
         }
         FlowRow(Modifier.padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -192,7 +194,7 @@ fun VideoEditorRoute(snackbar: SnackbarHostState, onBack: () -> Unit) {
                 FilterChip(selected = ui.tool == tool, onClick = { vm.tool(tool) }, label = { Text(tool.label) })
             }
         }
-        Column(Modifier.verticalScroll(rememberScrollState()).padding(12.dp)) {
+        Column(Modifier.fillMaxWidth().padding(12.dp)) {
             when (ui.tool) {
                 VideoTool.Trim -> TrimPanel(ui, vm)
                 VideoTool.Crop -> FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -280,79 +282,86 @@ fun VideoEditorRoute(snackbar: SnackbarHostState, onBack: () -> Unit) {
 @Composable
 private fun TrimPanel(ui: VideoEditUi, vm: VideoEditorViewModel) {
     val clip = ui.document.clips.getOrNull(ui.document.selected) ?: return
+    val duration = clip.durationMs.coerceAtLeast(1L)
     Text("Preview shows this clip. Export joins every clip in order.", style = MaterialTheme.typography.bodyMedium)
     Text("Start ${formatDuration(clip.startMs)}", style = MaterialTheme.typography.labelLarge)
     Slider(
-        value = clip.startMs.toFloat(),
+        value = timelineSliderValue(clip.startMs, duration),
         onValueChange = {
             vm.beginGesture()
             vm.previewTrim(it.toLong(), clip.endMs)
         },
         onValueChangeFinished = vm::endGesture,
-        valueRange = 0f..clip.durationMs.coerceAtLeast(1L).toFloat(),
+        valueRange = timelineSliderRange(duration),
     )
     Text("End ${formatDuration(clip.endMs)}", style = MaterialTheme.typography.labelLarge)
     Slider(
-        value = clip.endMs.toFloat(),
+        value = timelineSliderValue(clip.endMs, duration),
         onValueChange = {
             vm.beginGesture()
             vm.previewTrim(clip.startMs, it.toLong())
         },
         onValueChangeFinished = vm::endGesture,
-        valueRange = 0f..clip.durationMs.coerceAtLeast(1L).toFloat(),
+        valueRange = timelineSliderRange(duration),
     )
 }
 
 @Composable
 private fun MergePanel(ui: VideoEditUi, vm: VideoEditorViewModel, onAdd: () -> Unit) {
     val total = timelineDuration(ui.document.clips.map { ClipRange(it.startMs, it.endMs) })
-    Text("Timeline ${formatDuration(total)}. Drag order with the arrows.", style = MaterialTheme.typography.bodyMedium)
-    ui.document.clips.forEachIndexed { index, clip ->
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            FilterChip(
-                selected = ui.document.selected == index,
-                onClick = { vm.selectClip(index) },
-                label = { Text("${index + 1}. ${clip.name}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-            )
-            TextButton(onClick = { vm.moveClip(index, -1) }, enabled = index > 0) { Text("Up") }
-            TextButton(onClick = { vm.moveClip(index, 1) }, enabled = index < ui.document.clips.lastIndex) { Text("Down") }
-            TextButton(onClick = { vm.removeClip(index) }, enabled = ui.document.clips.size > 1) { Text("Remove") }
+    ScrollingOptions(maxHeight = 320.dp) {
+        Text("Timeline ${formatDuration(total)}. Drag order with the arrows.", style = MaterialTheme.typography.bodyMedium)
+        ui.document.clips.forEachIndexed { index, clip ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                FilterChip(
+                    selected = ui.document.selected == index,
+                    onClick = { vm.selectClip(index) },
+                    label = { Text("${index + 1}. ${clip.name}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                )
+                TextButton(onClick = { vm.moveClip(index, -1) }, enabled = index > 0) { Text("Up") }
+                TextButton(onClick = { vm.moveClip(index, 1) }, enabled = index < ui.document.clips.lastIndex) { Text("Down") }
+                TextButton(onClick = { vm.removeClip(index) }, enabled = ui.document.clips.size > 1) { Text("Remove") }
+            }
         }
+        TextButton(onClick = onAdd) { Text("Add clip") }
     }
-    TextButton(onClick = onAdd) { Text("Add clip") }
 }
 
 @Composable
 private fun AudioPanel(ui: VideoEditUi, vm: VideoEditorViewModel, onPick: () -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        Text("Remove original audio", modifier = Modifier.weight(1f))
-        Switch(checked = ui.document.removeAudio || ui.document.audioUri != null, onCheckedChange = vm::removeAudio, enabled = ui.document.audioUri == null)
+    ScrollingOptions {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Text("Remove original audio", modifier = Modifier.weight(1f))
+            Switch(checked = ui.document.removeAudio || ui.document.audioUri != null, onCheckedChange = vm::removeAudio, enabled = ui.document.audioUri == null)
+        }
+        TextButton(onClick = onPick) { Text(if (ui.document.audioUri == null) "Replace with a file" else "Change soundtrack") }
+        if (ui.document.audioUri != null) {
+            Text(ui.document.audioName, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("The picked file replaces the soundtrack for the whole export. Silence fills the gap before it starts.", style = MaterialTheme.typography.bodySmall)
+        }
     }
-    TextButton(onClick = onPick) { Text(if (ui.document.audioUri == null) "Replace with a file" else "Change soundtrack") }
     if (ui.document.audioUri != null) {
-        Text(ui.document.audioName, maxLines = 1, overflow = TextOverflow.Ellipsis)
         val timeline = timelineDuration(ui.document.clips.map { ClipRange(it.startMs, it.endMs) }).coerceAtLeast(1L)
         Text("Plays from ${formatDuration(ui.document.audioStartMs)} to ${formatDuration(ui.document.audioEndMs)}", style = MaterialTheme.typography.bodyMedium)
-        Text("The picked file replaces the soundtrack for the whole export. Silence fills the gap before it starts.", style = MaterialTheme.typography.bodySmall)
         Text("Range start", style = MaterialTheme.typography.labelLarge)
         Slider(
-            value = ui.document.audioStartMs.toFloat().coerceIn(0f, timeline.toFloat()),
+            value = timelineSliderValue(ui.document.audioStartMs, timeline),
             onValueChange = {
                 vm.beginGesture()
                 vm.previewAudio(it.toLong(), ui.document.audioEndMs)
             },
             onValueChangeFinished = vm::endGesture,
-            valueRange = 0f..timeline.toFloat(),
+            valueRange = timelineSliderRange(timeline),
         )
         Text("Range end", style = MaterialTheme.typography.labelLarge)
         Slider(
-            value = ui.document.audioEndMs.toFloat().coerceIn(0f, timeline.toFloat()),
+            value = timelineSliderValue(ui.document.audioEndMs, timeline),
             onValueChange = {
                 vm.beginGesture()
                 vm.previewAudio(ui.document.audioStartMs, it.toLong())
             },
             onValueChangeFinished = vm::endGesture,
-            valueRange = 0f..timeline.toFloat(),
+            valueRange = timelineSliderRange(timeline),
         )
         TextButton(onClick = vm::clearAudio) { Text("Remove soundtrack") }
     }
@@ -361,41 +370,43 @@ private fun AudioPanel(ui: VideoEditUi, vm: VideoEditorViewModel, onPick: () -> 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun OverlayPanel(ui: VideoEditUi, vm: VideoEditorViewModel) {
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OverlayKind.entries.forEach { kind ->
-            FilterChip(selected = ui.overlayKind == kind, onClick = { vm.overlayKind(kind) }, label = { Text(kind.name) })
+    ScrollingOptions {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OverlayKind.entries.forEach { kind ->
+                FilterChip(selected = ui.overlayKind == kind, onClick = { vm.overlayKind(kind) }, label = { Text(kind.name) })
+            }
         }
+        if (ui.overlayKind == OverlayKind.Text) {
+            OutlinedTextField(ui.draftText, vm::draft, label = { Text("Title") }, modifier = Modifier.fillMaxWidth())
+        }
+        VideoColorRow(ui.color, vm::color)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Whole timeline", modifier = Modifier.weight(1f))
+            Switch(checked = ui.wholeClip, onCheckedChange = vm::wholeClip)
+        }
+        TextButton(onClick = vm::addMark) { Text("Add overlay") }
     }
-    if (ui.overlayKind == OverlayKind.Text) {
-        OutlinedTextField(ui.draftText, vm::draft, label = { Text("Title") }, modifier = Modifier.fillMaxWidth())
-    }
-    VideoColorRow(ui.color, vm::color)
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("Whole timeline", modifier = Modifier.weight(1f))
-        Switch(checked = ui.wholeClip, onCheckedChange = vm::wholeClip)
-    }
-    TextButton(onClick = vm::addMark) { Text("Add overlay") }
     val mark = ui.document.marks.firstOrNull { it.id == ui.selectedMark }
     if (mark != null && !mark.wholeClip) {
         val timeline = timelineDuration(ui.document.clips.map { ClipRange(it.startMs, it.endMs) }).coerceAtLeast(1L)
         Text("From ${formatDuration(mark.startMs)} to ${formatDuration(mark.endMs)}", style = MaterialTheme.typography.bodyMedium)
         Slider(
-            value = mark.startMs.toFloat().coerceIn(0f, timeline.toFloat()),
+            value = timelineSliderValue(mark.startMs, timeline),
             onValueChange = {
                 vm.beginGesture()
                 vm.previewMarkRange(it.toLong(), mark.endMs)
             },
             onValueChangeFinished = vm::endGesture,
-            valueRange = 0f..timeline.toFloat(),
+            valueRange = timelineSliderRange(timeline),
         )
         Slider(
-            value = mark.endMs.toFloat().coerceIn(0f, timeline.toFloat()),
+            value = timelineSliderValue(mark.endMs, timeline),
             onValueChange = {
                 vm.beginGesture()
                 vm.previewMarkRange(mark.startMs, it.toLong())
             },
             onValueChangeFinished = vm::endGesture,
-            valueRange = 0f..timeline.toFloat(),
+            valueRange = timelineSliderRange(timeline),
         )
     }
     Text("Drag a mark on the preview to place it. It is burned in on export.", style = MaterialTheme.typography.bodySmall)

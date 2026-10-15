@@ -9,10 +9,15 @@ import com.mediaapp.data.media.MediaRepository
 import com.mediaapp.data.media.StoreAction
 import com.mediaapp.data.model.GalleryEntry
 import com.mediaapp.data.vault.VaultRepository
+import com.mediaapp.editor.CropSliderRange
+import com.mediaapp.editor.DefaultStroke
+import com.mediaapp.editor.DefaultTextSize
 import com.mediaapp.editor.EditorLaunchStore
 import com.mediaapp.editor.EditorStore
 import com.mediaapp.editor.FilterPreset
 import com.mediaapp.editor.UndoStack
+import com.mediaapp.editor.adjustStroke
+import com.mediaapp.editor.adjustTextSize
 import com.mediaapp.editor.image.CollageTemplate
 import com.mediaapp.editor.image.CropAspect
 import com.mediaapp.editor.image.ImageDocument
@@ -60,6 +65,8 @@ data class ImageEditUi(
     val draftText: String = "Hello",
     val shapeKind: ShapeKind = ShapeKind.Rectangle,
     val color: Int = 0xFFD6F25C.toInt(),
+    val stroke: Float = DefaultStroke,
+    val textSize: Float = DefaultTextSize,
 )
 
 @HiltViewModel
@@ -166,8 +173,9 @@ class ImageEditorViewModel @Inject constructor(
 
     fun tightness(scale: Float) {
         val doc = stack.current
-        val width = (doc.crop.width.coerceAtLeast(0.05f) * scale).coerceIn(0.15f, 1f)
-        val height = (doc.crop.height.coerceAtLeast(0.05f) * scale).coerceIn(0.15f, 1f)
+        val floor = CropSliderRange.start
+        val width = (doc.crop.width.coerceAtLeast(floor) * scale).coerceIn(floor, CropSliderRange.endInclusive)
+        val height = (doc.crop.height.coerceAtLeast(floor) * scale).coerceIn(floor, CropSliderRange.endInclusive)
         val cx = doc.crop.left + doc.crop.width / 2f
         val cy = doc.crop.top + doc.crop.height / 2f
         val left = (cx - width / 2f).coerceIn(0f, 1f - width)
@@ -189,14 +197,25 @@ class ImageEditorViewModel @Inject constructor(
     }
 
     fun addText() {
-        val stamp = TextStamp(UUID.randomUUID().toString(), _ui.value.draftText.ifBlank { "Hello" }, 0.12f, 0.2f, 0.07f, _ui.value.color)
+        val stamp = TextStamp(
+            UUID.randomUUID().toString(),
+            _ui.value.draftText.ifBlank { "Hello" },
+            0.12f,
+            0.2f,
+            _ui.value.textSize,
+            _ui.value.color,
+        )
         change({ it.copy(texts = it.texts + stamp) }, render = false)
         _ui.value = _ui.value.copy(selectedText = stamp.id)
     }
 
     fun selectText(id: String) {
         val text = stack.current.texts.firstOrNull { it.id == id }
-        _ui.value = _ui.value.copy(selectedText = id, draftText = text?.text ?: _ui.value.draftText)
+        _ui.value = _ui.value.copy(
+            selectedText = id,
+            draftText = text?.text ?: _ui.value.draftText,
+            textSize = text?.size ?: _ui.value.textSize,
+        )
     }
 
     fun moveText(id: String, dx: Float, dy: Float) {
@@ -207,8 +226,14 @@ class ImageEditorViewModel @Inject constructor(
     }
 
     fun resizeText(size: Float) {
-        val id = _ui.value.selectedText ?: return
-        change({ doc -> doc.copy(texts = doc.texts.map { if (it.id == id) it.copy(size = size) else it }) }, render = false)
+        val adjusted = adjustTextSize(stack.current.texts, _ui.value.selectedText, size)
+        if (adjusted.texts == stack.current.texts) {
+            _ui.value = _ui.value.copy(textSize = adjusted.size)
+            return
+        }
+        beginGesture()
+        stack.preview(stack.current.copy(texts = adjusted.texts))
+        _ui.value = snapshot().copy(textSize = adjusted.size)
     }
 
     fun recolorText() {
@@ -217,7 +242,16 @@ class ImageEditorViewModel @Inject constructor(
     }
 
     fun addShape() {
-        val stamp = ShapeStamp(UUID.randomUUID().toString(), _ui.value.shapeKind, 0.2f, 0.35f, 0.4f, 0.18f, _ui.value.color, 0.012f)
+        val stamp = ShapeStamp(
+            UUID.randomUUID().toString(),
+            _ui.value.shapeKind,
+            0.2f,
+            0.35f,
+            0.4f,
+            0.18f,
+            _ui.value.color,
+            _ui.value.stroke,
+        )
         change({ it.copy(shapes = it.shapes + stamp) }, render = false)
     }
 
@@ -229,10 +263,14 @@ class ImageEditorViewModel @Inject constructor(
     }
 
     fun stroke(value: Float) {
-        val shapes = stack.current.shapes
-        if (shapes.isEmpty()) return
-        val id = shapes.last().id
-        change({ doc -> doc.copy(shapes = doc.shapes.map { if (it.id == id) it.copy(stroke = value, color = _ui.value.color) else it }) }, render = false)
+        val adjusted = adjustStroke(stack.current.shapes, value, _ui.value.color)
+        if (adjusted.shapes == stack.current.shapes) {
+            _ui.value = _ui.value.copy(stroke = adjusted.width)
+            return
+        }
+        beginGesture()
+        stack.preview(stack.current.copy(shapes = adjusted.shapes))
+        _ui.value = snapshot().copy(stroke = adjusted.width)
     }
 
     fun template(value: CollageTemplate) {

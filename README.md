@@ -2,7 +2,7 @@
 
 Media App is a native Android gallery with its own video player. Photos and videos open in the app, including files other apps hand over with a view intent. A locked vault encrypts selected files so the system gallery and file managers can no longer see them.
 
-Package `com.mediaapp`, version 1.2.0. Minimum SDK 26. Compile SDK is Android 17 (API 37, minor 2). Target SDK is 37.
+Package `com.mediaapp`, version 1.2.1. Minimum SDK 26. Compile SDK is Android 17 (API 37, minor 2). Target SDK is 37.
 
 ## What phase 1 includes
 

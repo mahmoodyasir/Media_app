@@ -20,9 +20,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Redo
@@ -55,8 +53,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.OutlinedTextField
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mediaapp.editor.CropSliderRange
 import com.mediaapp.editor.FilterPreset
+import com.mediaapp.editor.StrokeSliderRange
+import com.mediaapp.editor.TextSliderRange
+import com.mediaapp.editor.cropSliderValue
 import com.mediaapp.editor.image.CollageTemplate
+import com.mediaapp.editor.strokeSliderValue
+import com.mediaapp.editor.textSizeSliderValue
 import com.mediaapp.editor.image.CropAspect
 import com.mediaapp.editor.image.ShapeKind
 
@@ -109,77 +113,88 @@ fun ImageEditorRoute(snackbar: SnackbarHostState, onBack: () -> Unit) {
                 FilterChip(selected = ui.tool == tool, onClick = { vm.tool(tool) }, label = { Text(tool.name) })
             }
         }
-        Column(Modifier.verticalScroll(rememberScrollState()).padding(12.dp)) {
-            when (ui.tool) {
-                ImageTool.Filters -> FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterPreset.entries.forEach { preset ->
-                        FilterChip(
-                            selected = ui.document.filter == preset,
-                            onClick = { vm.filter(preset) },
-                            label = { Text(preset.label) },
-                        )
-                    }
-                }
-                ImageTool.Crop -> {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        CropAspect.entries.forEach { aspect ->
-                            FilterChip(selected = ui.document.aspect == aspect, onClick = { vm.aspect(aspect) }, label = { Text(aspect.label) })
+        Column(Modifier.fillMaxWidth().padding(12.dp)) {
+            ScrollingOptions {
+                when (ui.tool) {
+                    ImageTool.Filters -> FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterPreset.entries.forEach { preset ->
+                            FilterChip(
+                                selected = ui.document.filter == preset,
+                                onClick = { vm.filter(preset) },
+                                label = { Text(preset.label) },
+                            )
                         }
                     }
-                    Row {
-                        TextButton(onClick = vm::rotate) { Text("Rotate") }
-                        TextButton(onClick = vm::flipHorizontal) { Text("Flip horizontal") }
-                        TextButton(onClick = vm::flipVertical) { Text("Flip vertical") }
+                    ImageTool.Crop -> {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            CropAspect.entries.forEach { aspect ->
+                                FilterChip(selected = ui.document.aspect == aspect, onClick = { vm.aspect(aspect) }, label = { Text(aspect.label) })
+                            }
+                        }
+                        Row {
+                            TextButton(onClick = vm::rotate) { Text("Rotate") }
+                            TextButton(onClick = vm::flipHorizontal) { Text("Flip horizontal") }
+                            TextButton(onClick = vm::flipVertical) { Text("Flip vertical") }
+                        }
+                        Text("Drag the photo to move the crop. The slider tightens it.", style = MaterialTheme.typography.bodyMedium)
                     }
-                    Text("Drag the photo to move the crop. The slider tightens it.", style = MaterialTheme.typography.bodyMedium)
-                    Slider(
-                        value = ui.document.crop.width.coerceIn(0.15f, 1f),
-                        onValueChange = {
-                            vm.beginGesture()
-                            vm.tightness(it / ui.document.crop.width.coerceAtLeast(0.15f))
-                        },
-                        onValueChangeFinished = { vm.endGesture(render = true) },
-                        valueRange = 0.2f..1f,
-                    )
+                    ImageTool.Text -> {
+                        OutlinedTextField(ui.draftText, vm::draft, label = { Text("Caption") }, modifier = Modifier.fillMaxWidth())
+                        ColorRow(ui.color, vm::color)
+                        TextButton(onClick = vm::addText) { Text("Add text") }
+                        TextButton(onClick = vm::recolorText) { Text("Update selected") }
+                    }
+                    ImageTool.Shapes -> {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            ShapeKind.entries.forEach { kind ->
+                                FilterChip(selected = ui.shapeKind == kind, onClick = { vm.shapeKind(kind) }, label = { Text(kind.name) })
+                            }
+                        }
+                        ColorRow(ui.color, vm::color)
+                        TextButton(onClick = vm::addShape) { Text("Add shape") }
+                    }
+                    ImageTool.Collage -> {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            CollageTemplate.entries.forEach { template ->
+                                FilterChip(selected = ui.template == template, onClick = { vm.template(template) }, label = { Text(template.label) })
+                            }
+                        }
+                        TextButton(onClick = {
+                            pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        }) { Text("Pick photos") }
+                        Text("Two, three, or four panels. Empty slots stay dark. The current filter is applied on export.", style = MaterialTheme.typography.bodyMedium)
+                    }
                 }
+            }
+            when (ui.tool) {
+                ImageTool.Crop -> Slider(
+                    value = cropSliderValue(ui.document.crop.width),
+                    onValueChange = {
+                        vm.beginGesture()
+                        vm.tightness(it / ui.document.crop.width.coerceAtLeast(CropSliderRange.start))
+                    },
+                    onValueChangeFinished = { vm.endGesture(render = true) },
+                    valueRange = CropSliderRange,
+                )
                 ImageTool.Text -> {
-                    OutlinedTextField(ui.draftText, vm::draft, label = { Text("Caption") }, modifier = Modifier.fillMaxWidth())
-                    ColorRow(ui.color, vm::color)
-                    TextButton(onClick = vm::addText) { Text("Add text") }
-                    TextButton(onClick = vm::recolorText) { Text("Update selected") }
                     Text("Size", style = MaterialTheme.typography.labelLarge)
                     Slider(
-                        value = ui.document.texts.firstOrNull { it.id == ui.selectedText }?.size ?: 0.07f,
+                        value = textSizeSliderValue(ui.document.texts, ui.selectedText, ui.textSize),
                         onValueChange = vm::resizeText,
-                        valueRange = 0.03f..0.2f,
+                        onValueChangeFinished = { vm.endGesture(render = false) },
+                        valueRange = TextSliderRange,
                     )
                 }
                 ImageTool.Shapes -> {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ShapeKind.entries.forEach { kind ->
-                            FilterChip(selected = ui.shapeKind == kind, onClick = { vm.shapeKind(kind) }, label = { Text(kind.name) })
-                        }
-                    }
-                    ColorRow(ui.color, vm::color)
-                    TextButton(onClick = vm::addShape) { Text("Add shape") }
                     Text("Stroke", style = MaterialTheme.typography.labelLarge)
                     Slider(
-                        value = ui.document.shapes.lastOrNull()?.stroke ?: 0.012f,
+                        value = strokeSliderValue(ui.document.shapes, ui.stroke),
                         onValueChange = vm::stroke,
-                        valueRange = 0.004f..0.05f,
+                        onValueChangeFinished = { vm.endGesture(render = false) },
+                        valueRange = StrokeSliderRange,
                     )
                 }
-                ImageTool.Collage -> {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        CollageTemplate.entries.forEach { template ->
-                            FilterChip(selected = ui.template == template, onClick = { vm.template(template) }, label = { Text(template.label) })
-                        }
-                    }
-                    TextButton(onClick = {
-                        pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                    }) { Text("Pick photos") }
-                    Text("Two, three, or four panels. Empty slots stay dark. The current filter is applied on export.", style = MaterialTheme.typography.bodyMedium)
-                }
+                else -> Unit
             }
         }
     }

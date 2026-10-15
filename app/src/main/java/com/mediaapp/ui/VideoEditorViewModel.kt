@@ -14,6 +14,7 @@ import com.mediaapp.editor.EditorLaunchStore
 import com.mediaapp.editor.EditorStore
 import com.mediaapp.editor.FilterPreset
 import com.mediaapp.editor.UndoStack
+import com.mediaapp.editor.playheadPosition
 import com.mediaapp.editor.image.ShapeKind
 import com.mediaapp.editor.video.AudioWindow
 import com.mediaapp.editor.video.ClipRange
@@ -111,6 +112,7 @@ class VideoEditorViewModel @Inject constructor(
     private var exportFile: File? = null
     private var userCancelled = false
     private var materialized = false
+    private var scrubbing = false
 
     private val _ui = MutableStateFlow(VideoEditUi(vault = entry?.vault == true, name = entry?.displayName ?: "Edited video"))
     val ui = _ui.asStateFlow()
@@ -190,7 +192,19 @@ class VideoEditorViewModel @Inject constructor(
     fun removeAudio(enabled: Boolean) = change { it.copy(removeAudio = enabled) }
 
     fun playhead(ms: Long) {
+        if (scrubbing) return
         _ui.value = _ui.value.copy(playheadMs = ms.coerceAtLeast(0L))
+    }
+
+    fun scrub(ms: Long, durationMs: Long): Long {
+        scrubbing = true
+        val clamped = playheadPosition(ms, durationMs)
+        _ui.value = _ui.value.copy(playheadMs = clamped)
+        return clamped
+    }
+
+    fun endScrub() {
+        scrubbing = false
     }
 
     fun previewAudio(startMs: Long, endMs: Long) {
